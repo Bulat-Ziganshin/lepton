@@ -3022,19 +3022,13 @@ bool decode_jpeg(const std::vector<std::pair<uint32_t, uint32_t> > & huff_input_
 
             // (re)set rst wait counter
             rstw = rsti;
-            if (cs_cmpc != colldata.get_num_components()) {
-                if (!g_allow_progressive) {
-                    custom_exit(ExitCode::PROGRESSIVE_UNSUPPORTED);
-                } else {
+            if (cs_cmpc != colldata.get_num_components() || jpegtype != 1) {
+                if (g_allow_progressive) {
                     is_baseline = false;
-                }
-            }
-
-            if (jpegtype != 1) {
-                if (!g_allow_progressive) {
-                    custom_exit(ExitCode::PROGRESSIVE_UNSUPPORTED);
                 } else {
-                    is_baseline = false;
+                    fprintf( stderr, "progressive-encoded jpegs aren't supported");
+                    errorlevel.store(2);  // todo: exit progran with ExitCode::PROGRESSIVE_UNSUPPORTED
+                    return false;
                 }
             }
             // decoding for interleaved data
@@ -3543,11 +3537,12 @@ bool recode_jpeg( void )
 
             // (re)set rst wait counter
             rstw = rsti;
-            if (cs_cmpc != colldata.get_num_components() && !g_allow_progressive) {
-                custom_exit(ExitCode::PROGRESSIVE_UNSUPPORTED);
-            }
-            if (jpegtype != 1 && !g_allow_progressive) {
-                custom_exit(ExitCode::PROGRESSIVE_UNSUPPORTED);
+            if (cs_cmpc != colldata.get_num_components() || jpegtype != 1) {
+                if (! g_allow_progressive) {
+                    fprintf( stderr, "progressive-encoded jpegs aren't supported");
+                    errorlevel.store(2);  // todo: exit progran with ExitCode::PROGRESSIVE_UNSUPPORTED
+                    return false;
+                }
             }
             if ((jpegtype != 1 || cs_cmpc != colldata.get_num_components())
                 && colldata.is_memory_optimized(0)
