@@ -236,13 +236,6 @@ bool read_jpeg(std::vector<std::pair<uint32_t,
                stream_reader *jpg_str_in,
                Sirikata::Array1d<uint8_t, 2> header,
                bool is_embedded_jpeg);
-bool read_jpeg_wrapper(std::vector<std::pair<uint32_t,
-                                     uint32_t>> *huff_input_offset,
-                       ibytestream *jpg_str_in,
-                       Sirikata::Array1d<uint8_t, 2> header,
-                       bool is_embedded_jpeg) {
-    return read_jpeg(huff_input_offset, jpg_str_in, header, is_embedded_jpeg);
-}
 
 bool read_jpeg_and_copy_to_side_channel(std::vector<std::pair<uint32_t,
                                                     uint32_t>> *huff_input_offset,
@@ -1912,9 +1905,9 @@ void process_file(IOUtil::FileReader* reader,
                             // cache all data in memory before going to parse the JPEG
                             caching_ibytestream caching_str_jpg_in(str_jpg_in);
                             TimingHarness::timing[0][TimingHarness::TS_READ_FINISHED] = TimingHarness::get_time_us();
-                            execute(std::bind(&read_jpeg<caching_ibytestream>, &huff_input_offset, &caching_str_jpg_in, header, embedded_jpeg));
+                            execute(std::bind(read_jpeg<caching_ibytestream>, &huff_input_offset, &caching_str_jpg_in, header, embedded_jpeg));
                         } else {
-                            execute(std::bind(&read_jpeg<ibytestream>, &huff_input_offset, &str_jpg_in, header, embedded_jpeg));
+                            execute(std::bind(read_jpeg<ibytestream>, &huff_input_offset, &str_jpg_in, header, embedded_jpeg));
                             TimingHarness::timing[0][TimingHarness::TS_READ_FINISHED] = TimingHarness::get_time_us();
                         }
                     } else {
@@ -1947,7 +1940,7 @@ void process_file(IOUtil::FileReader* reader,
                 {
                     unsigned int jpg_ident_offset = 2;
                     ibytestream str_jpg_in(str_in, jpg_ident_offset, Sirikata::JpegAllocator<uint8_t>());
-                    execute(std::bind(read_jpeg_wrapper, &huff_input_offset, &str_jpg_in, header,
+                    execute(std::bind(read_jpeg<ibytestream>, &huff_input_offset, &str_jpg_in, header,
                                       embedded_jpeg));
                 }
                 execute( write_info );
