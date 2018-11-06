@@ -691,6 +691,7 @@ void recode_physical_first_thread_wrapper(bounded_iostream*stream_out,
 /* -----------------------------------------------
     JPEG encoding routine
     ----------------------------------------------- */
+     int total_alloced = 0, total_size = 0;    
 bool recode_baseline_jpeg(bounded_iostream*str_out,
                           int max_file_size)
 {
@@ -850,7 +851,7 @@ bool recode_baseline_jpeg(bounded_iostream*str_out,
     if (!str_out->has_reached_bound() ) {
         str_out->write( hdrdata + byte_position, hdrs - byte_position );
     }
-    if (ujgversion != 1) {
+    if (ujgversion == 1) {
         for (size_t i = 0; i < NUM_THREADS; ++i) {
             delete huffws[i];
         }

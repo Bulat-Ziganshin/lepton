@@ -4,6 +4,7 @@
 #include "aligned_block.hh"
 #include "block_context.hh"
 #include <map>
+extern int total_alloced, total_size;    
 template<bool force_memory_optimization=false>
 class BlockBasedImageBase {
     typedef AlignedBlock Block;
@@ -29,6 +30,7 @@ public:
         image_ = nullptr;
         if (storage_ != nullptr) {
             custom_free(storage_);
+fprintf(stderr, "  -- %d\n", --total_alloced);        
         }
         storage_ = nullptr;
     }
@@ -66,6 +68,7 @@ public:
         }
         nblocks_ = nblocks;
         storage_ = (uint8_t*)custom_calloc(nblocks * sizeof(Block) + 31);
+fprintf(stderr, "  ++ %d (%d => %d)\n", ++total_alloced, int(nblocks * sizeof(Block) + 31), total_size += int(nblocks * sizeof(Block) + 31));        
         size_t offset = storage_ - (uint8_t*)nullptr;
         if (offset & 31) { //needs alignment adjustment
             image_ = (Block*)(storage_ + 32 - (offset & 31));

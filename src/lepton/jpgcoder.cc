@@ -237,14 +237,6 @@ bool read_jpeg(std::vector<std::pair<uint32_t,
                Sirikata::Array1d<uint8_t, 2> header,
                bool is_embedded_jpeg);
 
-bool read_jpeg_and_copy_to_side_channel(std::vector<std::pair<uint32_t,
-                                                    uint32_t>> *huff_input_offset,
-                                        ibytestreamcopier *jpg_str_in,
-                                        Sirikata::Array1d<uint8_t, 2> header,
-                                        bool is_embedded_jpeg) {
-    return read_jpeg(huff_input_offset, jpg_str_in, header, is_embedded_jpeg);
-}
-
 struct MergeJpegProgress;
 bool decode_jpeg(const std::vector<std::pair<uint32_t,
                                    uint32_t> > &huff_input_offset,
@@ -1917,7 +1909,7 @@ void process_file(IOUtil::FileReader* reader,
                                                      Sirikata::JpegAllocator<uint8_t>());
                         str_jpg_in.mutate_read_data().push_back(0xff);
                         str_jpg_in.mutate_read_data().push_back(0xd8);
-                        execute(std::bind(&read_jpeg_and_copy_to_side_channel,
+                        execute(std::bind(read_jpeg<ibytestreamcopier>,
                                           &huff_input_offset, &str_jpg_in, header,
                                           embedded_jpeg));
                         jpeg_file_raw_bytes.swap(str_jpg_in.mutate_read_data());
