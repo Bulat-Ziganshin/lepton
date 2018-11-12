@@ -21,7 +21,11 @@
 #else
 #define THREAD_LOCAL_STORAGE thread_local
 #endif
+
+// How much threads should be used to encode/decode current file,
+// with g_preload the value may be used prior to initialization in prepare_for_new_file()
 unsigned int NUM_THREADS = MAX_NUM_THREADS;
+
 const char *ExitString(ExitCode ec) {
   FOREACH_EXIT_CODE(GENERATE_EXIT_CODE_RETURN)
   static char data[] = "XXXX_EXIT_CODE_BEYOND_EXIT_CODE_ARRAY";
