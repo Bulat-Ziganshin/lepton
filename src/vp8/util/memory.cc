@@ -26,6 +26,19 @@
 // with g_preload the value may be used prior to initialization in prepare_for_new_file()
 unsigned int NUM_THREADS = MAX_NUM_THREADS;
 
+/* -----------------------------------------------
+    global variables: error handling
+    ----------------------------------------------- */
+
+std::string errormessage;
+std::atomic<int> errorlevel(0);
+// meaning of errorlevel:
+// -1 -> wrong input
+// 0 -> no error
+// 1 -> warning
+// 2 -> fatal error
+// ... -> see ExitCode definition
+
 const char *ExitString(ExitCode ec) {
   FOREACH_EXIT_CODE(GENERATE_EXIT_CODE_RETURN)
   static char data[] = "XXXX_EXIT_CODE_BEYOND_EXIT_CODE_ARRAY";
@@ -249,4 +262,12 @@ void custom_exit(ExitCode exit_code) {
     exit((int)exit_code);
 #endif
     abort();
+}
+
+// Set error code and message when image cannot be processed by the library
+void set_error_code(ExitCode code, const char* msg) {
+    // todo: exit program with errorlevel=code
+    fprintf(stderr, "%s\n", msg);
+    errormessage = msg;
+    errorlevel.store(int(code));
 }
