@@ -248,7 +248,7 @@ bool check_value_range( void );
 bool write_ujpg(std::vector<ThreadHandoff> row_thread_handoffs,
                 std::vector<uint8_t, Sirikata::JpegAllocator<uint8_t> >*jpeg_file_raw_bytes);
 bool read_ujpg( void );
-unsigned char read_fixed_ujpg_header( void );
+bool read_fixed_ujpg_header( void );
 bool prepare_for_next_image( void );
 
 
@@ -452,16 +452,20 @@ BaseDecoder *makeDecoder(bool threaded, bool start_workers, bool ans) {
 /* -----------------------------------------------
     global variables: info about files
     ----------------------------------------------- */
-int    jpgfilesize;            // size of JPEG file
-int    ujgfilesize;            // size of UJG file
-int    jpegtype = 0;        // type of JPEG coding: 0->unknown, 1->sequential, 2->progressive
-F_TYPE filetype;            // type of current file
-F_TYPE ofiletype = LEPTON;            // desired type of output file
-bool g_progressive_image = true;   // enabled for progressive-encoded and other expensive to process images
+enum {JPEG_UNKNOWN=0, JPEG_BASELINE=1, JPEG_PROGRESSIVE=2};
+int    jpgfilesize;                 // size of JPEG file
+int    ujgfilesize;                 // size of UJG file
+int    jpegtype = JPEG_UNKNOWN;     // type of JPEG coding
+F_TYPE filetype;                    // type of current file
+F_TYPE ofiletype = LEPTON;          // desired type of output file
+bool   g_progressive_image = true;  // enabled for progressive-encoded and other expensive to process images
 
+
+/* ------------------------------------------------
+    global variables
+    ----------------------------------------------- */
 bool g_do_preload = false;
 std::unique_ptr<BaseEncoder> g_encoder;
-
 std::unique_ptr<BaseDecoder> g_reference_to_free;
 ServiceInfo g_socketserve_info;
 
@@ -472,6 +476,7 @@ bool g_threaded = true;
 
 // this overrides the progressive bit in the header so that legacy progressive files may be decoded
 bool g_force_progressive = false;
+// allowance to process progressive-encoded JPEG files and LEPTON files produced from them
 bool g_allow_progressive = 
 #ifdef DEFAULT_ALLOW_PROGRESSIVE
     true
@@ -1212,7 +1217,7 @@ size_t decompression_memory_bound() {
             colldata.block_width(i)
             * 2 * NUM_THREADS * 64 * sizeof(uint16_t);
         size_t frame_buffer_size = colldata.component_size_allocated(i);
-        if (cs_cmpc != colldata.get_num_components() || jpegtype != 1) {
+        if (cs_cmpc != colldata.get_num_components() || jpegtype != JPEG_BASELINE) {
             streaming_size = frame_buffer_size;
         } else if (filetype != JPEG) {
             if (!g_threaded) {
@@ -1799,7 +1804,7 @@ void process_file(IOUtil::FileReader* reader,
             g_decoder = NULL;
         }
     } else if (filetype == LEPTON) {
-        NUM_THREADS = read_fixed_ujpg_header();
+        execute(read_fixed_ujpg_header);
         if (NUM_THREADS == 1) {
             g_threaded = false; // with singlethreaded, doesn't make sense to split out reader/writer
         }
@@ -1811,7 +1816,7 @@ void process_file(IOUtil::FileReader* reader,
             g_decoder->registerWorkers(get_worker_threads(NUM_THREADS), NUM_THREADS);
         }
     }else if (filetype == UJG) {
-        (void)read_fixed_ujpg_header();
+        execute(read_fixed_ujpg_header);
         g_decoder = new SimpleComponentDecoder;
         g_reference_to_free.reset(g_decoder);
     }
@@ -2255,7 +2260,7 @@ void nop (Sirikata::DecoderWriter*w, size_t) {
 /* -----------------------------------------------
     check file and determine filetype
     ----------------------------------------------- */
-unsigned char read_fixed_ujpg_header() {
+bool read_fixed_ujpg_header() {
     Sirikata::Array1d<unsigned char, 22> header;
     header.memset(0);
 
@@ -2277,11 +2282,20 @@ unsigned char read_fixed_ujpg_header() {
         while(write(2, err, sizeof(err) - 1) < 0 && errno == EINTR) {
         }
     }
+    g_progressive_image = true;
     if (header[1] == 'Z' || (header[1] & 1) == ('Y' & 1)) {
+        // option -forceprogressive enforces decoding images as progressive 
+        // because earlier Lepton versions didn't saved "is progressive?" flag
+        // in the LEPTON file header
         if (!g_force_progressive) {
             g_progressive_image = false;
         }
     }
+    if (g_progressive_image && !g_allow_progressive) {
+        set_error_code(ExitCode::PROGRESSIVE_UNSUPPORTED, "progressive-encoded jpegs aren't supported");
+        return false;
+    }
+    
     unsigned char num_threads_hint = header[2];
     always_assert(num_threads_hint != 0);
     if (num_threads_hint < NUM_THREADS && num_threads_hint != 0) {
@@ -2290,7 +2304,7 @@ unsigned char read_fixed_ujpg_header() {
 // full size of the original file
     Sirikata::Array1d<unsigned char, 4>::Slice file_size = header.slice<18,22>();
     max_file_size = LEtoUint32(file_size.begin());
-    return NUM_THREADS;
+    return true;
 }
 
 bool check_file(int fd_in, int fd_out, uint32_t max_file_size, bool force_zlib0,
@@ -2917,6 +2931,9 @@ MergeJpegStreamingStatus merge_jpeg_streaming(MergeJpegProgress *stored_progress
 bool decode_jpeg(const std::vector<std::pair<uint32_t, uint32_t> > & huff_input_offsets,
                  std::vector<ThreadHandoff>*luma_row_offset_return)
 {
+    // use simpler baseline jpeg processing unless file contains progressive data
+    g_progressive_image = false;
+
     // open huffman coded image data for input in abitreader
     abitreader huffr( huffdata, hufs );  // bitwise reader for image data
 
@@ -2933,7 +2950,6 @@ bool decode_jpeg(const std::vector<std::pair<uint32_t, uint32_t> > & huff_input_
     int cmp, bpos, dpos;
     int mcu = 0, sub, csc;
     int eob, sta;
-    bool is_progressive = false;
     max_cmp = 0; // the maximum component in a truncated image
     max_bpos = 0; // the maximum band in a truncated image
     memset(max_dpos, 0, sizeof(max_dpos)); // the maximum dpos in a truncated image
@@ -2973,8 +2989,8 @@ bool decode_jpeg(const std::vector<std::pair<uint32_t, uint32_t> > & huff_input_
         // check if huffman tables are available
         for ( csc = 0; csc < cs_cmpc; csc++ ) {
             cmp = cs_cmp[ csc ];
-            if ( (( jpegtype == 1 || (( cs_cmpc > 1 || cs_to == 0 ) && cs_sah == 0 )) && htset[ 0 ][ cmpnfo[cmp].huffdc ] == 0 ) || 
-                 ( jpegtype == 1 && htset[ 1 ][ cmpnfo[cmp].huffdc ] == 0 ) ||
+            if ( (( jpegtype == JPEG_BASELINE || (( cs_cmpc > 1 || cs_to == 0 ) && cs_sah == 0 )) && htset[ 0 ][ cmpnfo[cmp].huffdc ] == 0 ) || 
+                 ( jpegtype == JPEG_BASELINE && htset[ 1 ][ cmpnfo[cmp].huffdc ] == 0 ) ||
                  ( cs_cmpc == 1 && cs_to > 0 && cs_sah == 0 && htset[ 1 ][ cmpnfo[cmp].huffac ] == 0 ) ) {
                 fprintf( stderr, "huffman table missing in scan%i", scnc );
                 errorlevel.store(2);
@@ -3025,12 +3041,11 @@ bool decode_jpeg(const std::vector<std::pair<uint32_t, uint32_t> > & huff_input_
             // (re)set rst wait counter
             rstw = rsti;
 
-            if (cs_cmpc != colldata.get_num_components() || jpegtype != 1) {
+            if (cs_cmpc != colldata.get_num_components() || jpegtype != JPEG_BASELINE) {
                 if (g_allow_progressive) {
-                    is_progressive = true;
+                    g_progressive_image = true;
                 } else {
-                    fprintf( stderr, "progressive-encoded jpegs aren't supported");
-                    errorlevel.store(2);  // todo: exit progran with ExitCode::PROGRESSIVE_UNSUPPORTED
+                    set_error_code(ExitCode::PROGRESSIVE_UNSUPPORTED, "progressive-encoded jpegs aren't supported");
                     return false;
                 }
             }
@@ -3038,7 +3053,7 @@ bool decode_jpeg(const std::vector<std::pair<uint32_t, uint32_t> > & huff_input_
             // decoding for interleaved data
             if ( cs_cmpc > 1 )
             {
-                if ( jpegtype == 1 ) {
+                if ( jpegtype == JPEG_BASELINE ) {
                     // ---> sequential interleaved decoding <---
                     while ( sta == 0 ) {
                         if (do_handoff_print) {
@@ -3162,7 +3177,7 @@ bool decode_jpeg(const std::vector<std::pair<uint32_t, uint32_t> > & huff_input_
             }
             else // decoding for non interleaved data
             {
-                if ( jpegtype == 1 ) {
+                if ( jpegtype == JPEG_BASELINE ) {
                     int vmul = cmpnfo[0].bcv / mcuv;
                     int hmul = cmpnfo[0].bch / mcuh;
                     // ---> sequential non interleaved decoding <---
@@ -3425,11 +3440,6 @@ bool decode_jpeg(const std::vector<std::pair<uint32_t, uint32_t> > & huff_input_
         errorlevel.store(1);
     }
 
-    // switch to simpler baseline jpeg processing if file doesn't 
-    // contain progressive data
-    if (!is_progressive) {        
-        g_progressive_image = false;
-    }
     return true;
 }
 
@@ -3542,10 +3552,9 @@ bool recode_jpeg( void )
             // (re)set rst wait counter
             rstw = rsti;
 
-            if (jpegtype != 1 || cs_cmpc != colldata.get_num_components()) {
-                if (!g_allow_progressive) {
-                    fprintf( stderr, "progressive-encoded jpegs aren't supported");
-                    errorlevel.store(2);  // todo: exit progran with ExitCode::PROGRESSIVE_UNSUPPORTED
+            if (jpegtype != JPEG_BASELINE || cs_cmpc != colldata.get_num_components()) {
+                if (!g_progressive_image) {
+                    set_error_code(ExitCode::STREAM_INCONSISTENT, "Non-progressive LEPTON file contains progressive-specific data");
                     return false;
                 }
                 if (colldata.is_memory_optimized(0) && first_pass) {
@@ -3559,7 +3568,7 @@ bool recode_jpeg( void )
             // encoding for interleaved data
             if ( cs_cmpc > 1 )
             {
-                if ( jpegtype == 1 ) {
+                if ( jpegtype == JPEG_BASELINE ) {
                     // ---> sequential interleaved encoding <---
                     while ( sta == 0 ) {
                         // copy from colldata
@@ -3640,7 +3649,7 @@ bool recode_jpeg( void )
             }
             else // encoding for non interleaved data
             {
-                if ( jpegtype == 1 ) {
+                if ( jpegtype == JPEG_BASELINE ) {
                     // ---> sequential non interleaved encoding <---
                     while ( sta == 0 ) {
                         const AlignedBlock& aligned_block = colldata.block((BlockType)cmp, dpos);
@@ -4545,8 +4554,8 @@ bool prepare_for_next_image( void )
             qtables[ i ][ bpos ] = 0;
     }
 
-    // preset jpegtype
-    jpegtype  = 0;
+    // reset jpegtype
+    jpegtype = JPEG_UNKNOWN;
 
     // reset padbit
     padbit = -1;
@@ -4556,7 +4565,7 @@ bool prepare_for_next_image( void )
 
     // initialize per-file variables (that may be changed later)
     // from the global options
-    g_progressive_image = g_allow_progressive;    
+    g_progressive_image = true;
     NUM_THREADS = MAX_NUM_THREADS;
     g_threaded = option_threaded;    
 
@@ -4609,7 +4618,7 @@ bool setup_imginfo_jpg(bool only_allocate_two_image_rows)
              ( cmpnfo[cmp].sfh == 0 ) ||
              ( cmpnfo[cmp].qtable == NULL ) ||
              ( cmpnfo[cmp].qtable[0] == 0 ) ||
-             ( jpegtype == 0 ) ) {
+             ( jpegtype == JPEG_UNKNOWN ) ) {
             fprintf( stderr, "header information is incomplete" );
             errorlevel.store(2);
             return false;
@@ -4662,7 +4671,7 @@ bool setup_imginfo_jpg(bool only_allocate_two_image_rows)
         for ( cmp = 0; cmp < cmpc; cmp++ ) cmpnfo[ cmp ].sid = 0;
     }
     // alloc memory for further operations
-    if (! colldata.init(cmpnfo, cmpc, mcuh, mcuv, jpegtype == 1 && only_allocate_two_image_rows)) {
+    if (! colldata.init(cmpnfo, cmpc, mcuh, mcuv, jpegtype == JPEG_BASELINE && only_allocate_two_image_rows)) {
         return false;
     }
     return true;
@@ -4809,9 +4818,9 @@ bool parse_jfif_jpg( unsigned char type, unsigned int len, unsigned int alloc_le
 
             // set JPEG coding type
             if ( type == 0xC2 )
-                jpegtype = 2;
+                jpegtype = JPEG_PROGRESSIVE;
             else
-                jpegtype = 1;
+                jpegtype = JPEG_BASELINE;
 
             // check data precision, only 8 bit is allowed
             lval = hpos < alloc_len ? segment[ hpos ]:0;
@@ -5762,7 +5771,7 @@ bool write_info( void )
 
     // info about image
     fprintf( fp, "<Infofile for JPEG image:>\n\n\n");
-    fprintf( fp, "coding process: %s\n", ( jpegtype == 1 ) ? "sequential" : "progressive" );
+    fprintf( fp, "coding process: %s\n", ( jpegtype == JPEG_BASELINE ) ? "sequential" : "progressive" );
     // fprintf( fp, "no of scans: %i\n", scnc );
     fprintf( fp, "imageheight: %i / imagewidth: %i\n", imgheight, imgwidth );
     fprintf( fp, "component count: %i\n", cmpc );
