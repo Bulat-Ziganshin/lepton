@@ -122,35 +122,45 @@ unsigned char *aligned_alloc(size_t dsize) {
     }
     return data;
 }
+
 /* -----------------------------------------------
-	constructor for abytewriter class
+	alloc larger buffer and move data; abort program on failure
 	----------------------------------------------- */	
 
-abytewriter::abytewriter( int size )
+void abytewriter::extend_buffer( int newSize )
 {
-	adds  = 65536;
-	cbyte = 0;
-	
-	error = false;
-	fmem  = true;
-	
-	dsize = ( size > 0 ) ? size : adds;
-    data = aligned_alloc(dsize);
-	if ( data == NULL ) {
-		error = true;
+    unsigned char* newData = aligned_alloc(newSize);
+    if ( newData == NULL ) {
+        error = true;
         custom_exit(ExitCode::MALLOCED_NULL);
-		return;
-	}
+    }
+    if (dsize)  memcpy(newData, data, dsize);
+    dsize = newSize;
+    aligned_dealloc(data);
+    data = newData;
 }
 
 /* -----------------------------------------------
-	destructor for abytewriter class
+	constructor and destructor for abytewriter class
 	----------------------------------------------- */	
+
+abytewriter::abytewriter( int size ) :
+	adds  (65536),
+	cbyte (0),
+	
+	error (false),
+	fmem  (true),
+	
+    data  (nullptr),
+	dsize (0)
+{
+    extend_buffer(( size > 0 ) ? size : adds);
+}
 
 abytewriter::~abytewriter( void )
 {
-	// free data if pointer is not read
-	if (fmem && data) aligned_dealloc(data);
+	// free buffer if we still own it
+	if (fmem)  aligned_dealloc(data);
 }
 
 /* -----------------------------------------------
@@ -159,55 +169,26 @@ abytewriter::~abytewriter( void )
 
 void abytewriter::write( unsigned char byte )
 {
-	// safety check for error
-	if ( error ) return;
-	
-	// test if pointer beyond flush threshold
-	if ( cbyte >= ( dsize - 2 ) ) {
-        if (data) {
-            unsigned char * newData = aligned_alloc(dsize *  2);
-            memcpy(newData, data, dsize);
-            dsize *= 2;
-            aligned_dealloc(data);
-            data = newData;
-        }
-		if ( data == NULL ) {
-			error = true;
-            custom_exit(ExitCode::MALLOCED_NULL);
-			return;
-		}
-	}
-	
-	// write data
-	data[ cbyte++ ] = byte;
+    write_n ( &byte, 1 );
 }
 
 /* -----------------------------------------------
 	writes n byte to abytewriter
 	----------------------------------------------- */
 
-void abytewriter::write_n( unsigned char* byte, int n )
+void abytewriter::write_n( unsigned char* src, int n )
 {
 	// safety check for error
 	if ( error ) return;
 
 	// make sure that pointer doesn't get beyond flush threshold
-	while ( ( cbyte + n ) >= ( dsize - 2 ) ) {
-        unsigned char * newData = aligned_alloc(dsize *  2);
-        memcpy(newData, data, dsize);
-        dsize *= 2;
-        aligned_dealloc(data);
-        data = newData;
-		if ( data == NULL ) {
-            error = true;
-            custom_exit(ExitCode::MALLOCED_NULL);
-			return;
-		}
+	while ( cbyte + n > dsize ) {
+        extend_buffer(dsize * 2);
 	}
 
-	// copy data from array
-	while ( n-- > 0 )
-		data[ cbyte++ ] = *(byte++);
+	// write data to the buffer
+    memcpy ( data + cbyte, src, n );
+    cbyte += n;
 }
 
 /* -----------------------------------------------
