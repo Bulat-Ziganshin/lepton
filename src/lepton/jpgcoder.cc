@@ -2068,8 +2068,9 @@ void process_file(IOUtil::FileReader* reader,
           if ( errorlevel.load() < err_tresh ) {
                 if (action == comp ) {
                     fprintf(stdout, 
-                        (filetype == JPEG?  "STATS %.6lf %s %d %d %.6lf %.6lf %.6lf\n"
-                                         :  "STATS %.6lf %s %d %d %.6lf\n"),
+                        (filetype == JPEG?  "%s %.6lf %s %d %d %.6lf %.6lf %.6lf\n"
+                                         :  "%s %.6lf %s %d %d %.6lf\n"),
+                        jpegtype == JPEG_BASELINE? "baseline" : "progressive",
                         double(TimingHarness::timing[0][TimingHarness::TS_DONE] - TimingHarness::timing[0][TimingHarness::TS_READ_FINISHED]) / 1e6,
                         ifilename,
                         (int)jpgfilesize, 
