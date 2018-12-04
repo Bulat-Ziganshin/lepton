@@ -17,6 +17,9 @@ struct ResizableByteBufferList {
     ResizableByteBufferListNode * head;
     ResizableByteBufferListNode * tail;
     ResizableByteBufferList() {
+        clear();
+    }
+    void clear() {
         head = NULL;
         tail = NULL;
     }
@@ -33,9 +36,6 @@ struct ResizableByteBufferList {
     }
     bool empty()const {
         return head == NULL && tail == NULL;
-    }
-    bool size_gt_1()const {
-        return head != tail;
     }
     ResizableByteBufferListNode * front() {
         return head;
@@ -60,7 +60,7 @@ struct ResizableByteBufferList {
 
 class VP8ComponentDecoder_SendToVirtualThread {
     ResizableByteBufferList vbuffers[Sirikata::MuxReader::MAX_STREAM_ID];
-    // Auto-release all buffers allocated in this class by saving them into:
+    // Save here all buffers allocated in this class in order to delete them once the entire file was processed:
     std::vector<std::unique_ptr<ResizableByteBufferListNode>> allocated_buffers;
     
     GenericWorker *all_workers;
@@ -70,6 +70,7 @@ public:
     int8_t thread_target[Sirikata::MuxReader::MAX_STREAM_ID]; // 0 is the current thread
     VP8ComponentDecoder_SendToVirtualThread();
     void init(GenericWorker *generic_workers);
+    void reset_all_comm_buffers();
     
     void bind_thread(uint8_t virtual_thread_id, int8_t physical_thread_id) {
         thread_target[virtual_thread_id] = physical_thread_id;
@@ -83,6 +84,11 @@ public:
 class VP8ComponentDecoder_SendToActualThread {
 public:
     ResizableByteBufferList vbuffers[Sirikata::MuxReader::MAX_STREAM_ID];
+    void reset_all_comm_buffers() {
+        for (unsigned int thread_id = 0; thread_id < NUM_THREADS; ++thread_id) {
+            vbuffers[thread_id].clear();
+        }
+    }
 };
 
 class ActualThreadPacketReader : public PacketReader{

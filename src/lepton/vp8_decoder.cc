@@ -197,12 +197,14 @@ VP8ComponentDecoder_SendToVirtualThread::VP8ComponentDecoder_SendToVirtualThread
 
 void VP8ComponentDecoder_SendToVirtualThread::init(GenericWorker * all_workers) {
     this->eof = false;
-    for (unsigned int thread_id = 0; thread_id < MAX_NUM_THREADS; ++thread_id) {
-        if (!vbuffers[thread_id].empty()) {
-            vbuffers[thread_id].pop();
-        }
-    }
+    reset_all_comm_buffers();
     this->all_workers = all_workers;
+}
+void VP8ComponentDecoder_SendToVirtualThread::reset_all_comm_buffers() {
+    for (unsigned int thread_id = 0; thread_id < NUM_THREADS; ++thread_id) {
+        vbuffers[thread_id].clear();  // clear queues that may still hold some buffers
+    }
+    allocated_buffers.clear();  // this also releases memory occupied by buffers contents
 }
 void VP8ComponentDecoder_SendToVirtualThread::send(ResizableByteBufferListNode *data) {
     always_assert(data);
@@ -371,11 +373,8 @@ namespace{void nop(){}}
 
 template <class BoolDecoder>
 void VP8ComponentDecoder<BoolDecoder>::reset_all_comm_buffers() {
-    for (unsigned int thread_id = 0; thread_id < NUM_THREADS; ++thread_id) {
-        while (!send_to_actual_thread_state.vbuffers[thread_id].empty()) {
-            send_to_actual_thread_state.vbuffers[thread_id].pop();
-        }
-    }
+    send_to_actual_thread_state.reset_all_comm_buffers();
+    mux_splicer.reset_all_comm_buffers();    
 }
 
 template <class BoolDecoder>
