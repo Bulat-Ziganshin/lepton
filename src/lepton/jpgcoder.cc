@@ -410,49 +410,49 @@ int cs_sah       =   0  ; // successive approximation bit pos high
 int cs_sal       =   0  ; // successive approximation bit pos low
 void kill_workers(void * workers, uint64_t num_workers);
 BaseDecoder* g_decoder = NULL;
-GenericWorker * get_worker_threads(unsigned int num_workers) {
+
+GenericWorker *get_worker_threads(unsigned int num_workers) {
     // in this case decoding is asymmetric to encoding, just forget the assert
     if (NUM_THREADS < 2) {
         return NULL;
     }
-    GenericWorker* retval = GenericWorker::get_n_worker_threads(num_workers);
+    GenericWorker *retval = GenericWorker::get_n_worker_threads(num_workers);
     TimingHarness::timing[0][TimingHarness::TS_THREAD_STARTED] = TimingHarness::get_time_us();
 
     return retval;
 }
 
-template <class BoolDecoder>VP8ComponentDecoder<BoolDecoder> *makeBoth(bool threaded, bool start_workers) {
-    VP8ComponentDecoder<BoolDecoder> *retval = new VP8ComponentDecoder<BoolDecoder>(threaded);
+template <class BoolDecoder>VP8ComponentDecoder<BoolDecoder> *makeBoth(int num_threads, bool start_workers) {
+    VP8ComponentDecoder<BoolDecoder> *retval = new VP8ComponentDecoder<BoolDecoder>(num_threads);
     TimingHarness::timing[0][TimingHarness::TS_MODEL_INIT] = TimingHarness::get_time_us();
     if (start_workers) {
-        retval->registerWorkers(get_worker_threads(
-                                    NUM_THREADS
-                                    ),
-                                NUM_THREADS
-            );
+        retval->registerWorkers(get_worker_threads(num_threads), num_threads);
     }
     return retval;
 }
 
-template <class BoolDecoder>BaseEncoder *makeEncoder(bool threaded, bool start_workers) {
+template <class BoolDecoder>BaseEncoder *makeEncoder(int num_threads, bool start_workers) {
     TimingHarness::timing[0][TimingHarness::TS_MODEL_INIT_BEGIN] = TimingHarness::get_time_us();
-    VP8ComponentEncoder<BoolDecoder> * retval = new VP8ComponentEncoder<BoolDecoder>(threaded, IsDecoderAns<BoolDecoder>::IS_ANS);
+    VP8ComponentEncoder<BoolDecoder> *retval = new VP8ComponentEncoder<BoolDecoder>(num_threads, IsDecoderAns<BoolDecoder>::IS_ANS);
     TimingHarness::timing[0][TimingHarness::TS_MODEL_INIT] = TimingHarness::get_time_us();
+    
     if (start_workers) {
-        retval->registerWorkers(get_worker_threads(NUM_THREADS - 1), NUM_THREADS - 1);
+        retval->registerWorkers(get_worker_threads(num_threads - 1), num_threads - 1);
     }
     return retval;
 }
-BaseDecoder *makeDecoder(bool threaded, bool start_workers, bool ans) {
+
+BaseDecoder *makeDecoder(int num_threads, bool start_workers, bool ans) {
     if (ans) {
 #ifdef ENABLE_ANS_EXPERIMENTAL
-        return makeBoth<ANSBoolReader>(threaded, start_workers);
+        return makeBoth<ANSBoolReader>(num_threads, start_workers);
 #else
         always_assert(false && "ANS compile flag not selected");
 #endif
     }
-    return makeBoth<VPXBoolReader>(threaded, start_workers);
+    return makeBoth<VPXBoolReader>(num_threads, start_workers);
 }
+
 /* -----------------------------------------------
     global variables: info about files
     ----------------------------------------------- */
@@ -1237,7 +1237,7 @@ int initialize_options( int argc, const char*const * argv )
         exit(1);
     }
     if (g_do_preload && g_skip_validation) {
-        VP8ComponentDecoder<VPXBoolReader> *d = makeBoth<VPXBoolReader>(option_threaded, option_threaded && action != forkserve && action != socketserve);
+        VP8ComponentDecoder<VPXBoolReader> *d = makeBoth<VPXBoolReader>(NUM_THREADS, option_threaded && action != forkserve && action != socketserve);
         g_encoder.reset(d);
         g_decoder = d;
     }
@@ -1720,12 +1720,12 @@ void create_coder()
             if (!g_encoder) {
                 if (ujgversion == 3) {
 #ifdef ENABLE_ANS_EXPERIMENTAL
-                    g_encoder.reset(makeEncoder<ANSBoolReader>(g_threaded, g_threaded));
+                    g_encoder.reset(makeEncoder<ANSBoolReader>(NUM_THREADS, g_threaded));
 #else
                     always_assert(false&&"ANS-encoded file encountered but ANS not selected in build flags");
 #endif
                 } else {
-                    g_encoder.reset(makeEncoder<VPXBoolReader>(g_threaded, g_threaded));
+                    g_encoder.reset(makeEncoder<VPXBoolReader>(NUM_THREADS, g_threaded));
                 }
                 TimingHarness::timing[0][TimingHarness::TS_MODEL_INIT] = TimingHarness::get_time_us();
                 g_decoder = NULL;
@@ -1741,7 +1741,7 @@ void create_coder()
             g_threaded = false; // with singlethreaded, doesn't make sense to split out reader/writer
         }
         if (!g_decoder) {
-            g_decoder = makeDecoder(g_threaded, g_threaded, ujgversion == 3);
+            g_decoder = makeDecoder(NUM_THREADS, g_threaded, ujgversion == 3);
             TimingHarness::timing[0][TimingHarness::TS_MODEL_INIT] = TimingHarness::get_time_us();
             g_reference_to_free.reset(g_decoder);
         } else if (NUM_THREADS > 1 && g_threaded && (action == socketserve || action == forkserve)) {

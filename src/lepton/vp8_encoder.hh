@@ -7,7 +7,11 @@
 #include "../io/MuxReader.hh"
 #include "lepton_codec.hh"
 
-template<class BoolDecoder> class VP8ComponentEncoder : protected LeptonCodec<BoolDecoder>, public BaseEncoder {
+template<class BoolDecoder> class VP8ComponentEncoder : protected LeptonCodec<BoolDecoder>, public BaseEncoder
+{
+private:
+    bool mUseAnsEncoder;
+
     template<class Left, class Middle, class Right, class BoolEncoder>
     static void process_row(ProbabilityTablesBase&pt,
                             Left & left_model,
@@ -18,6 +22,7 @@ template<class BoolDecoder> class VP8ComponentEncoder : protected LeptonCodec<Bo
                          Sirikata::Array1d<ConstBlockContext,
                                            (uint32_t)ColorChannel::NumBlockTypes> &context,
                          BoolEncoder &bool_encoder);
+
     template <class BoolEncoder> void process_row_range(unsigned int thread_id,
                            const UncompressedComponents * const colldata,
                            int min_y,
@@ -26,7 +31,7 @@ template<class BoolDecoder> class VP8ComponentEncoder : protected LeptonCodec<Bo
                            BoolEncoder *bool_encoder,
                            Sirikata::Array1d<std::vector<NeighborSummary>,
                                              (uint32_t)ColorChannel::NumBlockTypes> *num_nonzeros);
-    bool mUseAnsEncoder;
+
     template<class BoolEncoder> void threaded_encode_inner(const UncompressedComponents * const colldata,
                                                            const ThreadHandoff *selected_splits,
                                                            unsigned int num_selected_splits,
@@ -34,13 +39,12 @@ template<class BoolDecoder> class VP8ComponentEncoder : protected LeptonCodec<Bo
                                                            Sirikata::MuxReader::ResizableByteBuffer stream[Sirikata::MuxReader::MAX_STREAM_ID]);
 
 public:
-    VP8ComponentEncoder(bool do_threading, bool use_ans_encoder);
+    VP8ComponentEncoder(int num_threads, bool use_ans_encoder);
+
     void registerWorkers(GenericWorker * workers, unsigned int num_workers) {
         this->LeptonCodec<BoolDecoder>::registerWorkers(workers, num_workers);
     }
-    bool do_threading() const {
-        return this->do_threading_;
-    }
+
     CodingReturnValue vp8_full_encoder( const UncompressedComponents * const colldata,
                                         Sirikata::CountingWriter *str_out,
                                         const ThreadHandoff *selected_splits,
@@ -51,12 +55,13 @@ public:
                                    Sirikata::CountingWriter *str_out,
                                    const ThreadHandoff *selected_splits,
                                    unsigned int num_selected_splits);
+
     size_t get_decode_model_memory_usage() const {
         return this->model_memory_used();
     }
+
     size_t get_decode_model_worker_memory_usage() const {
         return this->model_worker_memory_used();
     }
-
 };
 #endif

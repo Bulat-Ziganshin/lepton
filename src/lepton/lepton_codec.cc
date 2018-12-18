@@ -286,7 +286,7 @@ CodingReturnValue LeptonCodec<BoolDecoder>::ThreadState::vp8_decode_thread(unsig
         if (cur_row.done) {
             break;
         }
-        if (cur_row.luma_y >= max_y && thread_id + 1 != NUM_THREADS) {
+        if (cur_row.luma_y >= max_y && thread_id + 1 != num_threads_) {
             break;
         }
         if (cur_row.skip) {
@@ -309,7 +309,11 @@ CodingReturnValue LeptonCodec<BoolDecoder>::ThreadState::vp8_decode_thread(unsig
 }
 
 
-template<class BoolDecoder> void LeptonCodec<BoolDecoder>::worker_thread(ThreadState *ts, int thread_id, UncompressedComponents * const colldata,
+template<class BoolDecoder> void LeptonCodec<BoolDecoder>::worker_thread(
+                                        ThreadState *ts,
+                                        int thread_id,
+                                        int num_threads,
+                                        UncompressedComponents * const colldata,
                                         int8_t thread_target[Sirikata::MuxReader::MAX_STREAM_ID],
                                         GenericWorker *worker,
                                         VP8ComponentDecoder_SendToActualThread *send_to_actual_thread_state) {
@@ -317,7 +321,7 @@ template<class BoolDecoder> void LeptonCodec<BoolDecoder>::worker_thread(ThreadS
     for (uint8_t i = 0; i < Sirikata::MuxReader::MAX_STREAM_ID; ++i) {
         if (thread_target[i] == int8_t(thread_id)) {
             std::unique_ptr<PacketReader> reader {new ActualThreadPacketReader(i, worker, send_to_actual_thread_state)};
-            ts->init_bool_decoder(std::move(reader));
+            ts->init_bool_decoder(num_threads, std::move(reader));
         }
     }
     while (ts->vp8_decode_thread(thread_id, colldata) == CODING_PARTIAL) {

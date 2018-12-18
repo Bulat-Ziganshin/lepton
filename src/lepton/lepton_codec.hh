@@ -102,6 +102,7 @@ static LeptonCodec_RowSpec LeptonCodec_row_spec_from_index(uint32_t decode_index
 template <class BoolDecoder> class LeptonCodec{
 protected:
     struct ThreadState {
+        int num_threads_;
         ProbabilityTablesBase model_;
         BoolDecoder bool_decoder_;
         std::unique_ptr<PacketReader> reader_;  // input stream consumed by the bool decoder
@@ -113,11 +114,14 @@ protected:
         Sirikata::Array1d<std::vector<NeighborSummary>, (size_t)ColorChannel::NumBlockTypes> num_nonzeros_;
         uint32_t decode_index_;
         bool is_valid_range_;
+        
     public:
-        void init_bool_decoder(std::unique_ptr<PacketReader> reader) {
+        void init_bool_decoder(int num_threads, std::unique_ptr<PacketReader> reader) {
+            num_threads_ = num_threads;
             reader_.swap(reader);
             bool_decoder_.init(reader_.get());
         }
+
         template<class Left, class Middle, class Right, bool should_force_memory_optimization>
         void decode_row(Left & left_model,
                         Middle& middle_model,
@@ -154,8 +158,8 @@ protected:
                                                   NumBlockTypes> component_size_in_blocks,
                                 int component,
                                 int curr_y);
+    }; // struct ThreadState
 
-    };
     static uint32_t gcd(uint32_t a, uint32_t b) {
         while(b) {
             uint32_t tmp = a % b;
@@ -164,31 +168,36 @@ protected:
         }
         return a;
     }
+
 public:
-    static void worker_thread(ThreadState *, int thread_id, UncompressedComponents * const colldata,
+    static void worker_thread(ThreadState *ts,
+                              int thread_id,
+                              int num_threads,
+                              UncompressedComponents * const colldata,
                               int8_t thread_target[Sirikata::MuxReader::MAX_STREAM_ID],
-                              GenericWorker*worker,
-                              VP8ComponentDecoder_SendToActualThread*data_receiver);
+                              GenericWorker *worker,
+                              VP8ComponentDecoder_SendToActualThread *send_to_actual_thread_state);
 
 protected:
-    bool do_threading_;
-    GenericWorker* spin_workers_;
+    int num_threads_;
+    GenericWorker *spin_workers_;
     unsigned int num_registered_workers_;
     Sirikata::Array1d<ThreadState*, MAX_NUM_THREADS> thread_state_;
 
     void reset_thread_model_state(int thread_id) {
         TimingHarness::timing[thread_id][TimingHarness::TS_MODEL_INIT_BEGIN] = TimingHarness::get_time_us();
-
         if (!thread_state_[thread_id]) {
             thread_state_[thread_id] = new ThreadState;
         }
         thread_state_[thread_id]->model_.model().set_tables_identity();
         TimingHarness::timing[thread_id][TimingHarness::TS_MODEL_INIT] = TimingHarness::get_time_us();
     }
+
     void registerWorkers(GenericWorker* workers, unsigned int num_workers) {
         num_registered_workers_ = num_workers;
         spin_workers_ = workers;
     }
+
     size_t model_worker_memory_used() const {
         size_t retval = 0;
         for (size_t i = 1;i < thread_state_.size(); ++i) {
@@ -208,24 +217,25 @@ protected:
         }
         return retval;
     }
-    LeptonCodec(bool do_threading) {
+
+    bool do_threading() const {
+        return num_threads_ > 1;
+    }
+
+    LeptonCodec(int num_threads) {
         spin_workers_ = NULL;
         num_registered_workers_ = 0; // need to wait
-        do_threading_ = do_threading;
-        unsigned int num_threads = 1;
-        if (do_threading) {
-            num_threads = NUM_THREADS;
-        }
+        num_threads_ = num_threads;
         thread_state_.memset(0);
-        always_assert(num_threads <= MAX_NUM_THREADS);
+        always_assert(num_threads_ <= MAX_NUM_THREADS);
         
-        for (unsigned int i = 0; i < num_threads; ++i) {
-
+        for (unsigned int i = 0; i < num_threads_; ++i) {
             //thread_state_[i] = new ThreadState;
             //thread_state_[i]->model_.model().set_tables_identity();
             //thread_state_[i]->model_.load_probability_tables();
         }
     }
+
     ~LeptonCodec() {
         for (unsigned int i = 0; i < thread_state_.size(); ++i) {
             if (thread_state_[i]) {
@@ -233,7 +243,6 @@ protected:
             }
         }
     }
-
 };
 
 #endif

@@ -64,11 +64,12 @@ class VP8ComponentDecoder_SendToVirtualThread {
     std::vector<std::unique_ptr<ResizableByteBufferListNode>> allocated_buffers;
     
     GenericWorker *all_workers;
+    bool do_threading_;
     bool eof;
     void set_eof();
 public:
     int8_t thread_target[Sirikata::MuxReader::MAX_STREAM_ID]; // 0 is the current thread
-    VP8ComponentDecoder_SendToVirtualThread();
+    VP8ComponentDecoder_SendToVirtualThread(bool do_threading);
     void init(GenericWorker *generic_workers);
     
     void bind_thread(uint8_t virtual_thread_id, int8_t physical_thread_id) {

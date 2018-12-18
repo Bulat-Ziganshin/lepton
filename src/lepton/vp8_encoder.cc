@@ -68,10 +68,12 @@ void printContext(FILE * fp) {
 }
 
 template <class ArithmeticCoder>
-VP8ComponentEncoder<ArithmeticCoder>::VP8ComponentEncoder(bool do_threading, bool use_ans_encoder)
-    : LeptonCodec<ArithmeticCoder>(do_threading){
+VP8ComponentEncoder<ArithmeticCoder>::VP8ComponentEncoder(int num_threads, bool use_ans_encoder)
+    : LeptonCodec<ArithmeticCoder>(num_threads)
+{
     this->mUseAnsEncoder = use_ans_encoder;
 }
+
 template <class ArithmeticCoder>
 CodingReturnValue VP8ComponentEncoder<ArithmeticCoder>::encode_chunk(const UncompressedComponents *input,
                                                                      Sirikata::CountingWriter *str_out,
@@ -80,6 +82,7 @@ CodingReturnValue VP8ComponentEncoder<ArithmeticCoder>::encode_chunk(const Uncom
 {
     return vp8_full_encoder(input, str_out, selected_splits, num_selected_splits, this->mUseAnsEncoder);
 }
+
 template <class ArithmeticCoder>
 template<class Left, class Middle, class Right, class BoolEncoder>
 void VP8ComponentEncoder<ArithmeticCoder>::process_row(ProbabilityTablesBase &pt,
@@ -256,7 +259,7 @@ void VP8ComponentEncoder<ArithmeticCoder>::process_row_range(unsigned int thread
     uint8_t is_top_row[(uint32_t)ColorChannel::NumBlockTypes];
     memset(is_top_row, true, sizeof(is_top_row));
     ProbabilityTablesBase *model = nullptr;
-    if (this->do_threading_) {
+    if (this->do_threading()) {
         LeptonCodec<ArithmeticCoder>::reset_thread_model_state(thread_id);
         model = &this->thread_state_[thread_id]->model_;
     } else {
@@ -277,7 +280,7 @@ void VP8ComponentEncoder<ArithmeticCoder>::process_row_range(unsigned int thread
         if(cur_row.done) {
             break;
         }
-        if (cur_row.luma_y >= max_y && thread_id + 1 != NUM_THREADS) {
+        if (cur_row.luma_y >= max_y && thread_id + 1 != this->num_threads_) {
             break;
         }
         if (cur_row.skip) {
@@ -435,7 +438,7 @@ void VP8ComponentEncoder<ArithmeticCoder>::process_row_range(unsigned int thread
                                        colldata->get_mcu_count_vertical(),
                                        max_coded_heights);
     
-    if (thread_id == NUM_THREADS - 1 && (test.skip == false || test.done == false)) {
+    if (thread_id == this->num_threads_ - 1 && (test.skip == false || test.done == false)) {
         fprintf(stderr, "Row spec test: cmp %d luma %d item %d skip %d done %d\n",
                 test.component, test.luma_y, test.curr_y, test.skip, test.done);
         custom_exit(ExitCode::ASSERTION_FAILURE);
@@ -466,7 +469,7 @@ template<class BoolEncoder> void VP8ComponentEncoder<BoolDecoder>::threaded_enco
     using namespace Sirikata;
     Array1d<std::vector<NeighborSummary>,
             (uint32_t)ColorChannel::NumBlockTypes> num_nonzeros[MAX_NUM_THREADS];
-    for (unsigned int thread_id = 0; thread_id < NUM_THREADS; ++thread_id) {
+    for (unsigned int thread_id = 0; thread_id < this->num_threads_; ++thread_id) {
         bool_encoder[thread_id].init();
         for (size_t i = 0; i < num_nonzeros[thread_id].size(); ++i) {
             num_nonzeros[thread_id].at(i).resize(colldata->block_width(i) << 1);
@@ -474,7 +477,7 @@ template<class BoolEncoder> void VP8ComponentEncoder<BoolDecoder>::threaded_enco
     }
     
     if (this->do_threading()) {
-        for (unsigned int thread_id = 1; thread_id < NUM_THREADS; ++thread_id) {
+        for (unsigned int thread_id = 1; thread_id < this->num_threads_; ++thread_id) {
             this->spin_workers_[thread_id - 1].work
                 = std::bind(&VP8ComponentEncoder<BoolDecoder>::process_row_range<BoolEncoder>, this,
                             thread_id,
@@ -495,7 +498,7 @@ template<class BoolEncoder> void VP8ComponentEncoder<BoolDecoder>::threaded_enco
                       &bool_encoder[0],
                       &num_nonzeros[0]);
     if(!this->do_threading()) { // single threading
-        for (unsigned int thread_id = 1; thread_id < NUM_THREADS; ++thread_id) {
+        for (unsigned int thread_id = 1; thread_id < this->num_threads_; ++thread_id) {
             process_row_range(thread_id,
                               colldata,
                               selected_splits[thread_id].luma_y_start,
@@ -509,7 +512,7 @@ template<class BoolEncoder> void VP8ComponentEncoder<BoolDecoder>::threaded_enco
                   "Need to have enough mux streams for all threads and simd width");
     
     if (this->do_threading()) {
-        for (unsigned int thread_id = 1; thread_id < NUM_THREADS; ++thread_id) {
+        for (unsigned int thread_id = 1; thread_id < this->num_threads_; ++thread_id) {
             TimingHarness::timing[thread_id][TimingHarness::TS_THREAD_WAIT_STARTED] = TimingHarness::get_time_us();
             this->spin_workers_[thread_id - 1].main_wait_for_done();
             TimingHarness::timing[thread_id][TimingHarness::TS_THREAD_WAIT_FINISHED] = TimingHarness::get_time_us();

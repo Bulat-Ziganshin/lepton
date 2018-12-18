@@ -43,7 +43,7 @@ private:
 
     int virtual_thread_id_;
 public:
-    VP8ComponentDecoder(bool do_threading);
+    VP8ComponentDecoder(int num_threads);
     // reads the threading information and uses mux_reader_ to create the streams_ 
     // returns the bound of each threads' max_luma (non inclusive) responsibility in the file
     template <bool force_memory_optimized>
